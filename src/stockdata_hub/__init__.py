@@ -20,7 +20,7 @@ stockdata_hub —— 统一的多源股票数据接口库。
 """
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 # ---- 核心 ----
 from .core import (
@@ -30,6 +30,7 @@ from .core import (
     ProviderFetchError,
     StockDataError,
     get_default_manager,
+    create_provider_manager,
     retry_on_failure,
 )
 
@@ -72,7 +73,7 @@ from .providers import (
     UniversalStockProvider,
     register_builtin_providers,
 )
-from .name_provider import StockNameProvider
+from .name_provider import StockNameProvider, get_name_provider
 
 __all__ = [
     "__version__",
@@ -80,6 +81,7 @@ __all__ = [
     "DataProvider",
     "DataProviderManager",
     "get_default_manager",
+    "create_provider_manager",
     "retry_on_failure",
     "StockDataError",
     "NoProviderError",
@@ -115,4 +117,5 @@ __all__ = [
     "ItickProvider",
     "register_builtin_providers",
     "StockNameProvider",
+    "get_name_provider",
 ]

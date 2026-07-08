@@ -280,3 +280,13 @@ def get_default_manager() -> DataProviderManager:
     if _default_manager is None:
         _default_manager = DataProviderManager.build_default()
     return _default_manager
+
+
+def create_provider_manager() -> DataProviderManager:
+    """
+    便捷函数：获取默认的 Provider 管理器（进程级单例，已注册全部内置源）。
+
+    与旧 ``stock-cloud`` 中的 ``create_provider_manager()`` 语义一致：多次调用
+    返回同一实例，且该实例已按优先级注册好内置多源 Provider。
+    """
+    return get_default_manager()

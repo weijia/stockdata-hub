@@ -63,3 +63,19 @@ class StockNameProvider:
         if not self._code_to_name:
             self._load_a_stock_map()
         return self._code_to_name.get(code)
+
+
+# 模块级单例缓存
+_name_provider_instance: Optional["StockNameProvider"] = None
+
+
+def get_name_provider() -> "StockNameProvider":
+    """
+    便捷函数：获取股票名称转换 Provider 实例（进程级单例）。
+
+    与旧 ``stock-cloud`` 中的 ``get_name_provider()`` 语义一致。
+    """
+    global _name_provider_instance
+    if _name_provider_instance is None:
+        _name_provider_instance = StockNameProvider()
+    return _name_provider_instance
