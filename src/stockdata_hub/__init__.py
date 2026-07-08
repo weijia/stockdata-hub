@@ -20,7 +20,7 @@ stockdata_hub —— 统一的多源股票数据接口库。
 """
 from __future__ import annotations
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 # ---- 核心 ----
 from .core import (
