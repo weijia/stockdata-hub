@@ -40,9 +40,18 @@ from .http_provider import (
 )
 from .itick_provider import ItickProvider
 from .mootdx_provider import MootdxProvider
-from .openstockdata_provider import OpenStockDataProvider
+from .openstockdata_provider import (
+    OpenStockDataProvider,
+    OPENSTOCKDATA_AVAILABLE,
+    fetch_kline,
+)
 
 logger = logging.getLogger(__name__)
+
+# 旧 stock-cloud 兼容别名（同名不同层级，指向库内统一类）
+EastMoneyDataProvider = EastMoneyStockProvider
+SinaDataProvider = SinaStockProvider
+TencentDataProvider = TencentStockProvider
 
 # 默认注册顺序（含构造失败的容错）
 _PROVIDER_FACTORIES = [
@@ -85,4 +94,9 @@ __all__: List[str] = [
     "MootdxProvider",
     "OpenStockDataProvider",
     "ItickProvider",
+    "OPENSTOCKDATA_AVAILABLE",
+    "fetch_kline",
+    "EastMoneyDataProvider",
+    "SinaDataProvider",
+    "TencentDataProvider",
 ]

@@ -75,3 +75,13 @@ class OpenStockDataProvider(DataProvider):
         info = super().get_provider_info()
         info["available"] = OPENSTOCKDATA_AVAILABLE
         return info
+
+
+def fetch_kline(
+    symbol: str, days: int = 30
+) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    """便捷函数：用 :class:`OpenStockDataProvider` 取日 K线，返回统一契约 ``(df, err)``。
+
+    与旧 ``stock-cloud`` 的 ``openstockdata_adapter.fetch_kline`` 签名保持一致。
+    """
+    return OpenStockDataProvider().fetch_data(symbol, days)

@@ -20,7 +20,7 @@ stockdata_hub —— 统一的多源股票数据接口库。
 """
 from __future__ import annotations
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 # ---- 核心 ----
 from .core import (
@@ -72,6 +72,11 @@ from .providers import (
     TencentStockProvider,
     UniversalStockProvider,
     register_builtin_providers,
+    OPENSTOCKDATA_AVAILABLE,
+    fetch_kline,
+    EastMoneyDataProvider,
+    SinaDataProvider,
+    TencentDataProvider,
 )
 from .name_provider import StockNameProvider, get_name_provider
 
@@ -118,4 +123,9 @@ __all__ = [
     "register_builtin_providers",
     "StockNameProvider",
     "get_name_provider",
+    "OPENSTOCKDATA_AVAILABLE",
+    "fetch_kline",
+    "EastMoneyDataProvider",
+    "SinaDataProvider",
+    "TencentDataProvider",
 ]
