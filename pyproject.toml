@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stockdata-hub"
+version = "0.1.0"
+description = "统一的多源股票数据接口库：可插拔、按优先级兜底，把 akshare/mootdx/腾讯/新浪/东财/openstockdata/iTick 收敛为一套契约。"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "stockdata-hub contributors" }]
+keywords = ["stock", "akshare", "mootdx", "quant", "kline", "finance", "openstockdata"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "pandas>=1.3",
+    "requests>=2.25",
+]
+
+[project.urls]
+Homepage = "https://github.com/stockdata-hub/stockdata-hub"
+Documentation = "https://github.com/stockdata-hub/stockdata-hub#readme"
+Repository = "https://github.com/stockdata-hub/stockdata-hub"
+"Bug Tracker" = "https://github.com/stockdata-hub/stockdata-hub/issues"
+
+[project.optional-dependencies]
+# 各数据源均为可选依赖，缺失时对应 Provider 自动跳过（多源兜底、降级不崩）
+akshare = ["akshare"]
+mootdx = ["mootdx", "pytdx"]
+openstockdata = ["cn-a-stock-data"]
+itick = ["itick-sdk"]
+# 安装全部数据源支持：pip install stockdata-hub[all]
+all = ["akshare", "mootdx", "pytdx", "cn-a-stock-data", "itick-sdk"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+stockdata_hub = ["py.typed"]

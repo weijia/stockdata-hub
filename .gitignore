@@ -1,0 +1,30 @@
+# 构建产物
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.pyc
+
+# 测试 / 覆盖
+.pytest_cache/
+.coverage
+htmlcov/
+tests/.cache/
+
+# 编辑器 / OS
+.vscode/
+.idea/
+.DS_Store
+
+# 本库运行时缓存
+.cache/
+*.log
