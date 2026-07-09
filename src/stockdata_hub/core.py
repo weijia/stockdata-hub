@@ -109,6 +109,17 @@ class DataProvider(ABC):
         """判断此 Provider 是否能处理指定的股票代码 / 名称。"""
         raise NotImplementedError
 
+    def can_handle_request(self, symbol: str, days: int = 1) -> bool:
+        """
+        判断此 Provider 是否能满足「指定代码 + 历史天数」的请求。
+
+        默认等价于 :meth:`can_handle`（只看代码）。需要按 ``days`` 区分能力的
+        Provider（如仅支持当日快照的腾讯批量接口）应重写此方法，例如 ``days > 1``
+        时返回 ``False``，使管理器在尝试前就优雅跳过（记 debug 而非 warning），
+        避免刷出「设计内声明式跳过」的误导告警。
+        """
+        return self.can_handle(symbol)
+
     @abstractmethod
     def fetch_data(
         self, symbol: str, days: int = 30
@@ -227,8 +238,8 @@ class DataProviderManager:
         from .normalization import normalize_ohlcv
 
         for provider in self.providers:
-            if not provider.can_handle(symbol):
-                logger.debug(f"Provider {provider.get_name()} 不能处理 {symbol}")
+            if not provider.can_handle_request(symbol, days):
+                logger.debug(f"Provider {provider.get_name()} 不能处理 {symbol} (days={days})")
                 continue
 
             logger.info(f"尝试使用 Provider: {provider.get_name()}")

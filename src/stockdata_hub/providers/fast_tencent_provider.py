@@ -27,6 +27,14 @@ from ..core import DataProvider
 logger = logging.getLogger(__name__)
 
 
+def _to_float(value) -> float:
+    """容错转 float：空串、'--'、None 等非法值统一返回 0.0。"""
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def tencent_quote_batch(codes: List[str]) -> Dict[str, Dict]:
     """
     批量拉取腾讯财经实时行情（一次请求最多 800 只）。
@@ -62,8 +70,9 @@ def tencent_quote_batch(codes: List[str]) -> Dict[str, Dict]:
         try:
             req = urllib.request.Request(url)
             req.add_header("User-Agent", "Mozilla/5.0")
+            req.add_header("Referer", "https://gu.qq.com/")
             resp = urllib.request.urlopen(req, timeout=15)
-            data = resp.read().decode("gbk")
+            data = resp.read().decode("gbk", errors="replace")
         except Exception as e:  # noqa: BLE001
             logger.error(f"腾讯批量接口请求失败 (批次 {i // batch_size + 1}): {e}")
             continue
@@ -79,19 +88,19 @@ def tencent_quote_batch(codes: List[str]) -> Dict[str, Dict]:
                 code = key[2:]
                 all_results[code] = {
                     "name": vals[1],
-                    "price": float(vals[3] or 0),
-                    "last_close": float(vals[4] or 0),
-                    "open": float(vals[5] or 0),
-                    "change_amt": float(vals[31] or 0),
-                    "change_pct": float(vals[32] or 0),
-                    "high": float(vals[33] or 0),
-                    "low": float(vals[34] or 0),
-                    "volume": float(vals[36] or 0),
-                    "amount": float(vals[37] or 0),
-                    "turnover_pct": float(vals[38] or 0),
-                    "pe_ttm": float(vals[39] or 0),
-                    "mcap_yi": float(vals[44] or 0),
-                    "pb": float(vals[46] or 0),
+                    "price": _to_float(vals[3]),
+                    "last_close": _to_float(vals[4]),
+                    "open": _to_float(vals[5]),
+                    "change_amt": _to_float(vals[31]),
+                    "change_pct": _to_float(vals[32]),
+                    "high": _to_float(vals[33]),
+                    "low": _to_float(vals[34]),
+                    "volume": _to_float(vals[36]),
+                    "amount": _to_float(vals[37]),
+                    "turnover_pct": _to_float(vals[38]),
+                    "pe_ttm": _to_float(vals[39]),
+                    "mcap_yi": _to_float(vals[44]),
+                    "pb": _to_float(vals[46]),
                 }
             except (ValueError, IndexError) as e:  # noqa: BLE001
                 logger.debug(f"解析腾讯数据行失败: {e}")
@@ -123,11 +132,27 @@ class FastTencentProvider(DataProvider):
             return True
         return False
 
+    def _is_hk(self, symbol: str) -> bool:
+        """判断代码是否为港股（5 位数字，或 hk 前缀）。"""
+        if symbol.lower().startswith("hk"):
+            return True
+        return symbol.isdigit() and len(symbol) <= 5
+
+    def can_handle_request(self, symbol: str, days: int = 1) -> bool:
+        # 腾讯接口只有当日快照，无法提供历史 K线。
+        # 普通市场 days>1 时跳过，交由 mootdx/akshare 取历史；
+        # 港股(5 位/hk 前缀)无其它历史源兜底，腾讯当日快照即可满足实时价需求，
+        # 因此 days>1 也放行。
+        if days <= 1:
+            return self.can_handle(symbol)
+        return self._is_hk(symbol) and self.can_handle(symbol)
+
     def fetch_data(
         self, symbol: str, days: int = 30
     ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
-        # 腾讯接口只有当日快照，无法提供历史 K线
-        if days > 1:
+        # 腾讯接口只有当日快照，无法提供历史 K线；
+        # 但港股无其它源兜底，days>1 时也用当日快照返回（仅 1 行）。
+        if days > 1 and not self._is_hk(symbol):
             return None, f"腾讯批量接口仅支持当日数据(days=1)，需要{days}天历史，跳过"
 
         result = tencent_quote_batch([symbol])

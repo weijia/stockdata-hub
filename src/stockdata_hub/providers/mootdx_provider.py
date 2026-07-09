@@ -128,16 +128,33 @@ class MootdxProvider(DataProvider):
     ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
         if not MOOTDX_AVAILABLE:
             return None, "mootdx 未安装"
-        client = self._client
-        if client is None:
+        if self._client is None:
             return None, "mootdx 客户端未初始化"
 
-        try:
-            # frequency=9 表示日线
-            df = client.bars(symbol=symbol, frequency=9, offset=days)
-            if df is None or df.empty:
+        # 长驻 TCP 连接空闲后，首次请求可能偶发返回空（连接已失效但未被标记断开）。
+        # 遇到空结果/异常时重建连接重试一次，避免单点抖动直接降级到其它数据源。
+        df = None
+        for attempt in range(2):
+            try:
+                client = self._client
+                # frequency=9 表示日线
+                df = client.bars(symbol=symbol, frequency=9, offset=days)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"mootdx 请求异常（第 {attempt + 1} 次）: {symbol} - {e}")
+                df = None
+
+            if df is not None and not df.empty:
+                break
+            if attempt == 0:
+                logger.info(f"mootdx {symbol} 返回空，重建连接重试")
+                self._quick_start()
+            else:
                 return None, "mootdx 返回空数据"
 
+        if df is None or df.empty:
+            return None, "mootdx 返回空数据"
+
+        try:
             rename_map = {}
             if "datetime" in df.columns and "date" not in df.columns:
                 rename_map["datetime"] = "date"
