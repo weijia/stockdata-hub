@@ -39,6 +39,79 @@ class ProviderFetchError(StockDataError):
     """所有 Provider 都获取失败。"""
 
 
+def _rel_diff(a: float, b: float) -> float:
+    """返回 a、b 的相对差异绝对值 |a-b|/max(|a|,|b|)。"""
+    a, b = float(a), float(b)
+    denom = max(abs(a), abs(b))
+    if denom == 0:
+        return 0.0
+    return abs(a - b) / denom
+
+
+# 这些历史源偶发返回错误的当日/前一日收盘，需对其最后一根 bar 做跨源校验
+_LAST_BAR_VALIDATE_PROVIDERS = {"通达信TCP(mootdx)"}
+
+
+def validate_last_bar_against_realtime(
+    df: "pd.DataFrame", symbol: str, threshold: float = 0.005
+) -> Tuple["pd.DataFrame", bool]:
+    """用腾讯实时快照校验并修正 df 最后 1~2 根 bar 的收盘价。
+
+    腾讯实时快照提供权威的「当前价」与「昨收」，可纠正 mootdx 等历史源偶发的
+    当日/前一日收盘错误（如 002027 的 07-08 收盘被错返回 4.91，真实应为 4.72）。
+    仅当相对差异超过 ``threshold`` 时才修正，避免正常小幅波动被误改。
+
+    Returns:
+        (可能已修正的 df, 是否做过修正)
+    """
+    if df is None or len(df) == 0 or "close" not in df.columns:
+        return df, False
+    try:
+        from .providers.fast_tencent_provider import tencent_quote_batch
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"导入腾讯实时接口失败，跳过最后一根 bar 校验: {e}")
+        return df, False
+    try:
+        res = tencent_quote_batch([symbol])
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"腾讯实时校验调用失败，跳过: {e}")
+        return df, False
+    if not res or symbol not in res:
+        return df, False
+    q = res[symbol]
+    price = q.get("price")
+    last_close = q.get("last_close")
+    if price is None and last_close is None:
+        return df, False
+
+    df = df.copy()
+    close_pos = df.columns.get_loc("close")
+    corrected = False
+
+    # 修正最后一根（今日）收盘 -> 腾讯当前价
+    if price is not None and len(df) >= 1:
+        m_val = float(df.iloc[-1, close_pos])
+        if _rel_diff(m_val, price) > threshold:
+            logger.warning(
+                f"[{symbol}] mootdx 最后一根收盘 {m_val} 与腾讯实时 {price} 差异超阈值，已修正"
+            )
+            df.iloc[-1, close_pos] = price
+            corrected = True
+
+    # 修正倒数第二根（前一日）收盘 -> 腾讯昨收（前一日涨跌基准）
+    if last_close is not None and len(df) >= 2:
+        m_prev = float(df.iloc[-2, close_pos])
+        if _rel_diff(m_prev, last_close) > threshold:
+            logger.warning(
+                f"[{symbol}] mootdx 前一根收盘 {m_prev} 与腾讯昨收 {last_close} "
+                f"差异超阈值，已修正"
+            )
+            df.iloc[-2, close_pos] = last_close
+            corrected = True
+
+    return df, corrected
+
+
 def retry_on_failure(
     max_retries: int = 3,
     retry_delay: float = 2.0,
@@ -258,6 +331,14 @@ class DataProviderManager:
             df, err = normalize_ohlcv(raw, days)
             if df is not None and not df.empty:
                 self._last_used_provider = provider.get_name()
+                # mootdx 等源偶发返回错误的当日/前一日收盘，跨源校验修正最后一根 bar
+                if provider.get_name() in _LAST_BAR_VALIDATE_PROVIDERS:
+                    df, corrected = validate_last_bar_against_realtime(df, symbol)
+                    if corrected:
+                        logger.info(
+                            f"数据获取成功: {provider.get_name()}（最后一根 bar 已跨源校验修正）"
+                        )
+                        return df, None
                 logger.info(f"数据获取成功: {provider.get_name()}")
                 return df, None
             if err:
