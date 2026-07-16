@@ -39,7 +39,7 @@ except ImportError:  # pragma: no cover - 依赖可选
 class MootdxProvider(DataProvider):
     """通达信 TCP 高速行情 Provider（A股 / ETF 日线）。"""
 
-    def __init__(self) -> None:
+    def __init__(self, best_server: Optional[Tuple[str, int]] = None) -> None:
         self.name = "通达信TCP(mootdx)"
         self.priority = 1  # 第二优先级：K线速度最快
         self._client = None
@@ -48,7 +48,13 @@ class MootdxProvider(DataProvider):
 
         if MOOTDX_AVAILABLE:
             self._quick_start()
-            self._start_async_bench()
+            if best_server:
+                # 已知最快服务器（外部缓存注入）：直接连接，跳过 select_best_ip
+                # 测速（耗时且每次进程启动都要重跑），显著加快冷启动。
+                self._best_server = best_server
+                self._switch_to_best_server()
+            else:
+                self._start_async_bench()
 
     def _quick_start(self) -> None:
         try:
