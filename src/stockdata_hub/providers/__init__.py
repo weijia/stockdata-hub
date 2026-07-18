@@ -45,6 +45,7 @@ from .openstockdata_provider import (
     OPENSTOCKDATA_AVAILABLE,
     fetch_kline,
 )
+from .tushare_provider import TushareProvider
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ _PROVIDER_FACTORIES = [
     ItickProvider,
     SinaStockProvider,
     TencentStockProvider,
+    TushareProvider,
     ETFProvider,
     HKStockProvider,
     EastMoneyStockProvider,
@@ -96,6 +98,7 @@ __all__: List[str] = [
     "ItickProvider",
     "OPENSTOCKDATA_AVAILABLE",
     "fetch_kline",
+    "TushareProvider",
     "EastMoneyDataProvider",
     "SinaDataProvider",
     "TencentDataProvider",
