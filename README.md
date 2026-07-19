@@ -13,6 +13,7 @@
 - **缺依赖降级**：`akshare` / `mootdx` / `openstockdata` / `itick-sdk` 都是**可选依赖**；缺失时对应源自动跳过，不影响其它源。
 - **可插拔**：想加自己的源？继承 `DataProvider` 两个方法即可（见 [docs/add_provider.md](docs/add_provider.md)）。
 - **零强制网络依赖**：核心只依赖 `pandas` + `requests`，其余按需安装。
+- **分钟级数据**：`fetch_minute` / `fetch_intraday` 提供 `1m`~`60m` K 线，独立于日线兜底链、内置盘中轮询缓存（设计 §6.4）。
 
 ---
 
@@ -53,6 +54,33 @@ else:
 
 ---
 
+## 分钟数据（Intraday）
+
+除日线外，本库提供与 `fetch_stock_data` 平行的**分钟级 K 线**入口，沿用同一套「多源兜底 + 统一格式 + 限流防封」范式。
+
+```python
+from stockdata_hub import fetch_minute
+
+# 当日 1 分钟；symbol 支持代码 / 名称（如 "贵州茅台"）
+df, reason, code = fetch_minute("600519", period="1m", days=1)
+if df is not None:
+    # 600519 240 ['datetime','open','high','low','close','volume']
+    print(code, len(df), list(df.columns))
+    print(df[["datetime", "close", "volume"]].tail())
+```
+
+- 支持的 `period`：`"1m"` / `"5m"` / `"15m"` / `"30m"` / `"60m"`（默认 `"1m"`）。
+- 返回**统一分钟契约**：`datetime + OHLCV`（`volume` 单位 = 手，与日线一致），可选 `amount`。
+- 多源兜底链（优先级 1→4）：`mootdx 分钟` → `东财分钟` → `新浪分钟` → `openstockdata分钟`（可选，百度，后置兜底）。
+- 盘中轮询内置缓存（`use_cache=True`）：TTL 随周期（1m/5m=60s），跨 TTL 去重合并、不丢中间 bar。
+
+> 与日线接口向后兼容：日线用 `fetch_stock_data`（返回 `date`），分钟用 `fetch_intraday` / `fetch_minute`（返回 `datetime`），下游消费代码可共享 OHLCV 处理。
+>
+> 完整 API / 参数 / 错误码 / 契约字段见 👉 [docs/intraday_api.md](docs/intraday_api.md)；
+> 可运行示例见 👉 [examples/intraday_example.py](examples/intraday_example.py)。
+
+---
+
 ## 统一契约
 
 所有 Provider 最终返回的 DataFrame 满足：
@@ -86,6 +114,17 @@ else:
 | 7 | 东财替代 | （零额外依赖） | 直连东财 K线 |
 | 10 | 通用(akshare) | `akshare` | 最后兜底 |
 
+### 分钟源优先级（仅处理 `period` ∈ `1m/5m/15m/30m/60m`）
+
+| 优先级 | Provider | 依赖 | 源 |
+|-------|----------|------|-----|
+| 1 | 通达信TCP(mootdx)分钟 | `mootdx` | 通达信 TCP，实时、最快 |
+| 2 | 东财分钟 | （零额外依赖） | 东财 HTTP，历史深、需限流 |
+| 3 | 新浪分钟 | （零额外依赖） | 新浪 HTTP，兜底 |
+| 4（可选） | openstockdata分钟 | `cn-a-stock-data` | 百度 K线，后置兜底 |
+
+> 未安装 `mootdx` / `cn-a-stock-data` 时对应源自动跳过，不影响其余源（见 [docs/intraday_api.md §4](docs/intraday_api.md)）。
+
 ---
 
 ## 自定义：管理器 / 新增源
@@ -118,21 +157,30 @@ stockdata-hub/
 ├── LICENSE
 ├── CONTRIBUTING.md
 ├── docs/
-│   └── add_provider.md         # 如何新增 Provider
+│   ├── add_provider.md         # 如何新增 Provider
+│   ├── intraday_api.md         # 分钟数据 API 参考（参数/契约/错误码）
+│   ├── intraday_design.md      # 分钟数据设计文档
+│   └── intraday_requirements.md
+├── examples/
+│   └── intraday_example.py     # 分钟数据可运行示例
 ├── src/stockdata_hub/
-│   ├── __init__.py             # 公共 API
+│   ├── __init__.py             # 公共 API（含 fetch_minute 顶层函数）
 │   ├── core.py                 # DataProvider / DataProviderManager / 重试
 │   ├── code_utils.py           # 股票代码标准化
 │   ├── normalization.py        # 统一契约规范化
-│   ├── cache.py                # 可选缓存
+│   ├── cache.py                # 可选缓存 + 分钟轮询缓存
 │   ├── fetcher.py              # StockDataFetcher 门面
 │   ├── name_provider.py        # 名称->代码（可选）
 │   └── providers/              # 各数据源实现
 │       ├── akshare_provider.py
 │       ├── mootdx_provider.py
+│       ├── mootdx_minute_provider.py
+│       ├── eastmoney_minute_provider.py
+│       ├── sina_minute_provider.py
 │       ├── http_provider.py    # 新浪/腾讯/东财
 │       ├── fast_tencent_provider.py
 │       ├── openstockdata_provider.py
+│       ├── openstockdata_minute_provider.py
 │       └── itick_provider.py
 └── tests/
 ```

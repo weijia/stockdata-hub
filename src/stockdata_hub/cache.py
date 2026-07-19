@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import pickle
+import threading
 import time
 from typing import Any, Dict, Optional
 
@@ -53,6 +54,7 @@ class StockCacheManager:
 
         self._memory_cache: Dict[str, Any] = {}
         self._cache_timestamps: Dict[str, float] = {}
+        self._cache_ttls: Dict[str, float] = {}
 
     # ----- 目录 -----
 
@@ -67,7 +69,11 @@ class StockCacheManager:
     def _is_cache_valid(self, cache_key: str) -> bool:
         if cache_key not in self._cache_timestamps:
             return False
-        ttl = self.cache_config[cache_key]["ttl"] if cache_key in self.cache_config else 24 * 60 * 60
+        ttl = self._cache_ttls.get(cache_key)
+        if ttl is None:
+            ttl = self.cache_config[cache_key]["ttl"] if cache_key in self.cache_config else None
+        if ttl is None:
+            return False  # 未声明 TTL 的任意 key（如分钟缓存未传 ttl）不视为有效
         return (time.time() - self._cache_timestamps[cache_key]) < ttl
 
     def _load_from_disk(self, cache_key: str) -> Optional[Any]:
@@ -108,10 +114,12 @@ class StockCacheManager:
             return disk_data
         return None
 
-    def set(self, cache_key: str, data: Any) -> None:
-        """通用写入：内存 + 磁盘双写。"""
+    def set(self, cache_key: str, data: Any, ttl: Optional[float] = None) -> None:
+        """通用写入：内存 + 磁盘双写；``ttl`` 为可选过期秒数（分钟缓存使用动态 TTL）。"""
         self._memory_cache[cache_key] = data
         self._cache_timestamps[cache_key] = time.time()
+        if ttl is not None:
+            self._cache_ttls[cache_key] = ttl
         self._save_to_disk(cache_key, data)
 
     # ----- 便捷封装 -----
@@ -181,3 +189,91 @@ def get_cache_manager(cache_dir: Optional[str] = None) -> StockCacheManager:
     if _manager is None:
         _manager = StockCacheManager(cache_dir=cache_dir)
     return _manager
+
+
+# =========================================================================== #
+# 分钟轮询缓存（设计 §6.4）
+# =========================================================================== #
+# 不同周期的合理 TTL（秒）：1m/5m 盘中变化快取 60s；其余取约一个周期长度。
+_PERIOD_TTL_SECONDS = {
+    "1m": 60,
+    "5m": 60,
+    "15m": 900,
+    "30m": 1800,
+    "60m": 3600,
+    "1d": 0,  # 日线不入分钟轮询缓存
+}
+
+
+def period_ttl(period: str) -> float:
+    """返回某周期对应的轮询缓存 TTL（秒）；未知周期默认 60s。"""
+    return _PERIOD_TTL_SECONDS.get(period, 60)
+
+
+def _merge_by_datetime(old_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:
+    """按 ``datetime`` 去重合并两段分钟数据，冲突时保留``new_df``（最新）的值。
+
+    用于跨 TTL 拼接：新拉取结果与缓存按时间并集，避免轮询丢中间 bar。
+    """
+    frames = [f for f in (old_df, new_df) if f is not None and not f.empty]
+    if not frames:
+        return new_df if new_df is not None else old_df
+    if len(frames) == 1:
+        return frames[0].copy()
+    combined = pd.concat(frames, ignore_index=True)
+    if "datetime" not in combined.columns:
+        return frames[-1].copy()
+    combined = combined.drop_duplicates(subset=["datetime"], keep="last")
+    combined = combined.sort_values("datetime").reset_index(drop=True)
+    return combined
+
+
+class IntradayCache:
+    """分钟 K线轮询缓存（设计 §6.4）。
+
+    键为 ``(symbol, period)``（不含 ``days``/``count``，轮询场景窗口固定）；
+    值在 TTL 内直接返回，跨 TTL 重新拉取时与旧缓存按 ``datetime`` 去重合并，
+    避免轮询丢中间 bar。底层复用 :class:`StockCacheManager`（仅内存，不落盘）。
+    """
+
+    def __init__(self, manager: Optional[StockCacheManager] = None) -> None:
+        self._manager = manager or get_cache_manager()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _key(symbol: str, period: str) -> str:
+        return f"intraday:{symbol}:{period}"
+
+    def get(self, symbol: str, period: str) -> Optional[Dict[str, Any]]:
+        """命中且在 TTL 内返回 ``{"df": DataFrame, "source": str}``，否则 ``None``。"""
+        return self._manager.get(self._key(symbol, period))
+
+    def set(self, symbol: str, period: str, df: pd.DataFrame, source: str) -> None:
+        """直接写入（覆盖）缓存。"""
+        self._manager.set(
+            self._key(symbol, period),
+            {"df": df, "source": source},
+            ttl=period_ttl(period),
+        )
+
+    def merge_and_set(
+        self, symbol: str, period: str, new_df: pd.DataFrame, source: str
+    ) -> pd.DataFrame:
+        """与既有缓存按 ``datetime`` 去重合并后写入，返回合并后的 DataFrame。"""
+        key = self._key(symbol, period)
+        ttl = period_ttl(period)
+        with self._lock:
+            old = self._manager.get(key)
+            old_df = old.get("df") if isinstance(old, dict) else None
+            merged = _merge_by_datetime(old_df, new_df)
+            self._manager.set(key, {"df": merged, "source": source}, ttl=ttl)
+        return merged
+
+    def clear(self, symbol: Optional[str] = None, period: Optional[str] = None) -> None:
+        """清除缓存；``symbol``/``period`` 为 ``None`` 时按维度通配。"""
+        if symbol is None and period is None:
+            self._manager.clear_cache()  # 清除全部（含列表缓存，调用方知晓）
+            return
+        # 精确键清除
+        if symbol is not None and period is not None:
+            self._manager.clear_cache(self._key(symbol, period))

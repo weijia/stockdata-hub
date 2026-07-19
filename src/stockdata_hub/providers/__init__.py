@@ -40,11 +40,15 @@ from .http_provider import (
 )
 from .itick_provider import ItickProvider
 from .mootdx_provider import MootdxProvider
+from .mootdx_minute_provider import MootdxMinuteProvider
+from .eastmoney_minute_provider import EastMoneyMinuteProvider
+from .sina_minute_provider import SinaMinuteProvider
 from .openstockdata_provider import (
     OpenStockDataProvider,
     OPENSTOCKDATA_AVAILABLE,
     fetch_kline,
 )
+from .openstockdata_minute_provider import OpenStockDataMinuteProvider
 from .tushare_provider import TushareProvider
 
 logger = logging.getLogger(__name__)
@@ -58,6 +62,10 @@ TencentDataProvider = TencentStockProvider
 _PROVIDER_FACTORIES = [
     FastTencentProvider,
     MootdxProvider,
+    MootdxMinuteProvider,
+    EastMoneyMinuteProvider,
+    SinaMinuteProvider,
+    OpenStockDataMinuteProvider,
     OpenStockDataProvider,
     ItickProvider,
     SinaStockProvider,
@@ -94,7 +102,11 @@ __all__: List[str] = [
     "EastMoneyStockProvider",
     "EastMoneyAlternativeProvider",
     "MootdxProvider",
+    "MootdxMinuteProvider",
+    "EastMoneyMinuteProvider",
+    "SinaMinuteProvider",
     "OpenStockDataProvider",
+    "OpenStockDataMinuteProvider",
     "ItickProvider",
     "OPENSTOCKDATA_AVAILABLE",
     "fetch_kline",

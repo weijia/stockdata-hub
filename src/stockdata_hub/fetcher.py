@@ -28,6 +28,7 @@ from typing import Optional, Tuple
 
 import pandas as pd
 
+from .cache import IntradayCache
 from .core import DataProviderManager, get_default_manager
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ class StockDataFetcher:
         self.enable_name_resolution = enable_name_resolution
         self.stock_name_provider = None
         self._last_used_provider: Optional[str] = None
+        self._intraday_cache = IntradayCache()
 
         if enable_name_resolution:
             try:
@@ -90,6 +92,52 @@ class StockDataFetcher:
 
         self._last_used_provider = None
         return None, reason or "无法获取股票数据", None
+
+    def fetch_intraday(
+        self,
+        symbol: str,
+        period: str = "1m",
+        days: int = 1,
+        count: Optional[int] = None,
+        use_cache: bool = True,
+    ) -> Tuple[Optional[pd.DataFrame], Optional[str], Optional[str]]:
+        """
+        获取股票分时/分钟 K线数据。
+
+        Returns:
+            ``(DataFrame, 失败原因, 实际代码)``，语义同 :meth:`fetch_stock_data`。
+            ``use_cache`` 为轮询缓存开关（设计 §6.4，默认开启；命中则直接返回，
+            跨 TTL 重新拉取时与缓存按 ``datetime`` 去重合并）。
+        """
+        if not symbol:
+            return None, "无效的股票代码或名称", None
+
+        resolved = self._resolve_symbol(symbol)
+
+        # 轮询缓存（设计 §6.4）：TTL 内命中直接返回，仍记录缓存来源
+        if use_cache:
+            cached = self._intraday_cache.get(resolved, period)
+            if cached is not None and cached.get("df") is not None:
+                self._last_used_provider = cached.get("source")
+                df = cached["df"]
+                if count is not None:
+                    df = df.tail(int(count)).reset_index(drop=True)
+                logger.debug(f"分钟缓存命中: {resolved} {period}")
+                return df, None, resolved
+
+        df, reason = self.provider_manager.get_intraday(resolved, period, days, count)
+        if df is not None and not df.empty:
+            self._last_used_provider = self.provider_manager.get_last_used_provider()
+            if use_cache:
+                self._intraday_cache.merge_and_set(
+                    resolved, period, df, self._last_used_provider
+                )
+            if count is not None:
+                df = df.tail(int(count)).reset_index(drop=True)
+            return df, None, resolved
+
+        self._last_used_provider = None
+        return None, reason or "无法获取分钟数据", None
 
     def get_last_used_provider(self) -> Optional[str]:
         """返回上一次成功命中的 Provider 名称。"""

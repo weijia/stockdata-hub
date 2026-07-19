@@ -138,7 +138,12 @@ class FastTencentProvider(DataProvider):
             return True
         return symbol.isdigit() and len(symbol) <= 5
 
-    def can_handle_request(self, symbol: str, days: int = 1) -> bool:
+    def can_handle_request(
+        self, symbol: str, days: int = 1, period: str = "1d"
+    ) -> bool:
+        # 仅支持日线；分钟请求一概跳过，交由 mootdx/东财/新浪分钟源（设计 §5）。
+        if period not in getattr(self, "supports_periods", {"1d"}):
+            return False
         # 腾讯接口只有当日快照，无法提供历史 K线。
         # 普通市场 days>1 时跳过，交由 mootdx/akshare 取历史；
         # 港股(5 位/hk 前缀)无其它历史源兜底，腾讯当日快照即可满足实时价需求，

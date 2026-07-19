@@ -46,13 +46,15 @@ from .code_utils import (
 # ---- 归一化契约 ----
 from .normalization import (
     CANONICAL_COLUMNS,
+    CANONICAL_INTRADAY_COLUMNS,
     VOLUME_SHARE_TO_LOT,
     normalize_ohlcv,
+    normalize_intraday,
     to_lot,
 )
 
 # ---- 缓存 ----
-from .cache import StockCacheManager, get_cache_manager
+from .cache import StockCacheManager, get_cache_manager, IntradayCache
 
 # ---- 门面 ----
 from .fetcher import StockDataFetcher
@@ -67,7 +69,11 @@ from .providers import (
     HKStockProvider,
     ItickProvider,
     MootdxProvider,
+    MootdxMinuteProvider,
+    EastMoneyMinuteProvider,
+    SinaMinuteProvider,
     OpenStockDataProvider,
+    OpenStockDataMinuteProvider,
     SinaStockProvider,
     TencentStockProvider,
     TushareProvider,
@@ -79,6 +85,19 @@ from .providers import (
     SinaDataProvider,
     TencentDataProvider,
 )
+# ---- 分钟级便捷函数 ----
+def fetch_minute(
+    symbol: str,
+    period: str = "1m",
+    days: int = 1,
+    count: Optional[int] = None,
+    use_cache: bool = True,
+) -> Tuple[Optional[pd.DataFrame], Optional[str], Optional[str]]:
+    """顶层便捷函数：获取分钟 K线，等价于 ``StockDataFetcher().fetch_intraday(...)``。"""
+    fetcher = StockDataFetcher()
+    return fetcher.fetch_intraday(symbol, period, days, count, use_cache)
+
+
 from .name_provider import StockNameProvider, get_name_provider
 
 __all__ = [
@@ -100,7 +119,9 @@ __all__ = [
     "clean_stock_code",
     # 归一化
     "normalize_ohlcv",
+    "normalize_intraday",
     "CANONICAL_COLUMNS",
+    "CANONICAL_INTRADAY_COLUMNS",
     "VOLUME_SHARE_TO_LOT",
     "to_lot",
     # 缓存
@@ -119,7 +140,11 @@ __all__ = [
     "EastMoneyStockProvider",
     "EastMoneyAlternativeProvider",
     "MootdxProvider",
+    "MootdxMinuteProvider",
+    "EastMoneyMinuteProvider",
+    "SinaMinuteProvider",
     "OpenStockDataProvider",
+    "OpenStockDataMinuteProvider",
     "ItickProvider",
     "TushareProvider",
     "register_builtin_providers",
@@ -127,7 +152,9 @@ __all__ = [
     "get_name_provider",
     "OPENSTOCKDATA_AVAILABLE",
     "fetch_kline",
+    "fetch_minute",
     "EastMoneyDataProvider",
     "SinaDataProvider",
     "TencentDataProvider",
+    "IntradayCache",
 ]

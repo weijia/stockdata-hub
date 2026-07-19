@@ -177,25 +177,33 @@ class DataProvider(ABC):
     #: 优先级，越小越优先（子类覆盖）
     priority: int = 100
 
+    #: 支持的周期集合；默认仅日线。分钟 Provider 应覆盖为分钟集合，管理器据此在
+    #: 兜底前自动跳过不支持该 period 的源（设计 §5）。
+    supports_periods: set = {"1d"}
+
     @abstractmethod
     def can_handle(self, symbol: str) -> bool:
         """判断此 Provider 是否能处理指定的股票代码 / 名称。"""
         raise NotImplementedError
 
-    def can_handle_request(self, symbol: str, days: int = 1) -> bool:
+    def can_handle_request(
+        self, symbol: str, days: int = 1, period: str = "1d"
+    ) -> bool:
         """
-        判断此 Provider 是否能满足「指定代码 + 历史天数」的请求。
+        判断此 Provider 是否能满足「指定代码 + 历史天数 + 周期」的请求。
 
-        默认等价于 :meth:`can_handle`（只看代码）。需要按 ``days`` 区分能力的
-        Provider（如仅支持当日快照的腾讯批量接口）应重写此方法，例如 ``days > 1``
-        时返回 ``False``，使管理器在尝试前就优雅跳过（记 debug 而非 warning），
-        避免刷出「设计内声明式跳过」的误导告警。
+        默认等价于 :meth:`can_handle`，但会先按 ``period`` 过滤：若 ``period``
+        不在本 Provider 的 ``supports_periods`` 中，直接返回 ``False``，使管理器在
+        分钟请求时自动跳过仅支持日线的源、在日线请求时跳过仅支持分钟的源
+        （设计 §5）。
         """
+        if period not in getattr(self, "supports_periods", {"1d"}):
+            return False
         return self.can_handle(symbol)
 
     @abstractmethod
     def fetch_data(
-        self, symbol: str, days: int = 30
+        self, symbol: str, days: int = 30, period: str = "1d"
     ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
         """
         获取股票数据。
@@ -346,6 +354,73 @@ class DataProviderManager:
 
         self._last_used_provider = None
         return None, "所有 Provider 都无法获取数据"
+
+    def get_intraday(
+        self,
+        symbol: str,
+        period: str = "1m",
+        days: int = 1,
+        count: Optional[int] = None,
+    ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+        """
+        获取分钟级 K线：依次尝试所有 ``can_handle_request(symbol, days, period)``
+        为 True 的分钟 Provider（与 :meth:`get_data` 平行的分钟版）。
+
+        仅遍历声明支持该 ``period`` 的源（日线 Provider 对分钟 period 返回 False
+        被自动排除），归一化后返回统一分钟契约 DataFrame。
+
+        Returns:
+            ``(统一分钟契约 DataFrame, 错误信息)``。全部失败则数据为 ``None``。
+        """
+        if period not in {"1m", "5m", "15m", "30m", "60m"}:
+            return None, f"不支持的 period: {period}"
+
+        if not self.providers:
+            return None, "没有任何可用的 Provider"
+
+        from .normalization import normalize_intraday
+
+        for provider in self.providers:
+            try:
+                ok = provider.can_handle_request(symbol, days, period)
+            except TypeError:
+                # 旧 Provider 未实现 period 形参：视为非分钟源，跳过（防御性）
+                logger.debug(
+                    f"Provider {provider.get_name()} 不支持 period 参数，分钟请求跳过"
+                )
+                ok = False
+            if not ok:
+                logger.debug(
+                    f"Provider {provider.get_name()} 不能处理 {symbol} (period={period})"
+                )
+                continue
+
+            logger.info(f"尝试使用分钟 Provider: {provider.get_name()}")
+            try:
+                raw, error = provider.fetch_data(symbol, days, period)
+            except Exception as e:  # 单源异常不应拖垮整体
+                logger.warning(f"分钟 Provider {provider.get_name()} 抛异常: {e}")
+                continue
+
+            if raw is None or (isinstance(raw, pd.DataFrame) and raw.empty):
+                if error:
+                    logger.warning(
+                        f"分钟 Provider {provider.get_name()} 返回错误: {error}"
+                    )
+                continue
+
+            df, err = normalize_intraday(raw, period, days, count)
+            if df is not None and not df.empty:
+                self._last_used_provider = provider.get_name()
+                logger.info(f"分钟数据获取成功: {provider.get_name()}")
+                return df, None
+            if err:
+                logger.warning(
+                    f"分钟 Provider {provider.get_name()} 规范化失败: {err}"
+                )
+
+        self._last_used_provider = None
+        return None, "所有分钟 Provider 都无法获取数据"
 
     # ----- 查询 -----
 
