@@ -24,7 +24,7 @@ from typing import Optional, Tuple
 
 import pandas as pd
 
-__version__ = "0.1.3"
+__version__ = "0.1.6"
 
 # ---- 核心 ----
 from .core import (
