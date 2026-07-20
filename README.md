@@ -41,7 +41,7 @@ pip install stockdata-hub[itick]          # 全球行情（需 Token）
 from stockdata_hub import StockDataFetcher
 
 fetcher = StockDataFetcher()
-df, reason, code = fetcher.fetch_stock_data("600519", days=30)
+df, reason, code = fetcher.fetch_daily_kline("600519", days=30)  # 日 K 线（fetch_stock_data 为其兼容别名）
 
 if df is not None:
     print(df.tail())
@@ -51,6 +51,8 @@ else:
 ```
 
 返回三元组：`(DataFrame, 失败原因, 实际代码)`。成功时 `reason=None`。
+
+> 日 K 线接口的完整参数、统一契约、多源兜底优先级、以及"如何取前复权(qfq)"专题，见 👉 [docs/daily_kline_api.md](docs/daily_kline_api.md)。
 
 ---
 
@@ -158,6 +160,7 @@ stockdata-hub/
 ├── CONTRIBUTING.md
 ├── docs/
 │   ├── add_provider.md         # 如何新增 Provider
+│   ├── daily_kline_api.md      # 日 K 线 API 参考（参数/契约/兜底/前复权专题）
 │   ├── intraday_api.md         # 分钟数据 API 参考（参数/契约/错误码）
 │   ├── intraday_design.md      # 分钟数据设计文档
 │   └── intraday_requirements.md

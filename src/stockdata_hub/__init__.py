@@ -20,6 +20,10 @@ stockdata_hub —— 统一的多源股票数据接口库。
 """
 from __future__ import annotations
 
+from typing import Optional, Tuple
+
+import pandas as pd
+
 __version__ = "0.1.3"
 
 # ---- 核心 ----
@@ -98,6 +102,16 @@ def fetch_minute(
     return fetcher.fetch_intraday(symbol, period, days, count, use_cache)
 
 
+# ---- 日线级便捷函数 ----
+def fetch_daily(
+    symbol: str,
+    days: int = 30,
+) -> Tuple[Optional[pd.DataFrame], Optional[str], Optional[str]]:
+    """顶层便捷函数：获取日 K 线，等价于 ``StockDataFetcher().fetch_daily_kline(...)``。"""
+    fetcher = StockDataFetcher()
+    return fetcher.fetch_daily_kline(symbol, days)
+
+
 from .name_provider import StockNameProvider, get_name_provider
 
 __all__ = [
@@ -153,6 +167,7 @@ __all__ = [
     "OPENSTOCKDATA_AVAILABLE",
     "fetch_kline",
     "fetch_minute",
+    "fetch_daily",
     "EastMoneyDataProvider",
     "SinaDataProvider",
     "TencentDataProvider",

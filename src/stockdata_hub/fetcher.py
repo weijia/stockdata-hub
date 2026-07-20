@@ -71,11 +71,14 @@ class StockDataFetcher:
                 return code
         return symbol
 
-    def fetch_stock_data(
+    def fetch_daily_kline(
         self, symbol: str, days: int = 30
     ) -> Tuple[Optional[pd.DataFrame], Optional[str], Optional[str]]:
         """
-        获取股票日 K线数据。
+        获取股票**日 K 线**数据（清晰命名，等价于 ``fetch_stock_data``）。
+
+        返回带 ``date`` 列的日线统一契约 DataFrame；与 :meth:`fetch_intraday`
+        （分钟，返回 ``datetime`` 列）平行，二者靠方法名 + 时间列名区分。
 
         Returns:
             ``(DataFrame, 失败原因, 实际代码)``。
@@ -92,6 +95,13 @@ class StockDataFetcher:
 
         self._last_used_provider = None
         return None, reason or "无法获取股票数据", None
+
+    # 向后兼容别名：名字偏泛（"股票数据"不表意"日 K"），新代码请用 ``fetch_daily_kline``。
+    def fetch_stock_data(
+        self, symbol: str, days: int = 30
+    ) -> Tuple[Optional[pd.DataFrame], Optional[str], Optional[str]]:
+        """向后兼容别名：等价于 :meth:`fetch_daily_kline`（获取日 K 线）。"""
+        return self.fetch_daily_kline(symbol, days)
 
     def fetch_intraday(
         self,
