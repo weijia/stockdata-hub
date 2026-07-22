@@ -74,10 +74,9 @@ class SinaStockProvider(_AStockHttpProvider):
             return None, "新浪数据为空"
 
         df.columns = df.columns.str.lower()
-        if "date" not in df.columns and df.index.name:
-            df = df.reset_index()
-        elif "date" not in df.columns:
-            df = df.reset_index()
+        if "date" not in df.columns:
+            # stock_zh_a_daily 把日期放在 index 上（通常无列名），统一复位为 date 列
+            df = df.rename_axis("date").reset_index()
 
         required = ["open", "close", "high", "low", "volume"]
         missing = [c for c in required if c not in df.columns]
@@ -97,9 +96,10 @@ class SinaStockProvider(_AStockHttpProvider):
 
     @staticmethod
     def _format_symbol(symbol: str) -> str:
-        if symbol.startswith(("000", "002", "300")):
+        # akshare 的 stock_zh_a_daily 需要带 sz/sh 前缀
+        if symbol.startswith(("000", "001", "002", "003", "300", "301")):
             return f"sz{symbol}"
-        if symbol.startswith(("600", "601", "603", "688")):
+        if symbol.startswith(("600", "601", "603", "605", "688", "689")):
             return f"sh{symbol}"
         return symbol
 
@@ -152,9 +152,9 @@ class TencentStockProvider(_AStockHttpProvider):
 
     @staticmethod
     def _format_symbol(symbol: str) -> str:
-        if symbol.startswith(("000", "002", "300")):
-            return f"sz{symbol}"
-        return f"sh{symbol}"
+        # akshare 的 stock_zh_a_hist_tx 内部自行添加 sz/sh 前缀，这里返回纯 6 位代码，
+        # 避免二次加前缀导致腾讯接口返回空（进而 akshare 解析空响应报 index error）。
+        return symbol
 
 
 class EastMoneyStockProvider(_AStockHttpProvider):
