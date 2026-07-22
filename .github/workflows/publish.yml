@@ -1,0 +1,70 @@
+name: Publish to PyPI
+
+# 触发方式：推送形如 v0.1.6 的 tag，或在 GitHub 上发布 Release。
+# 推荐用 tag：本地打 tag 并 push 即可自动发布。
+#   git tag v0.1.6 && git push github v0.1.6
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Check version matches tag (仅 tag 触发时校验)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          PKG_VERSION=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "pyproject=$PKG_VERSION  tag=$TAG_VERSION"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::pyproject.toml 版本 ($PKG_VERSION) 与 tag ($TAG_VERSION) 不一致"
+            exit 1
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/stockdata-hub/
+    permissions:
+      id-token: write  # Trusted Publishing (OIDC) 必需，无需 API Token
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
