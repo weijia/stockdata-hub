@@ -29,6 +29,51 @@ except ImportError:  # pragma: no cover - 依赖可选
     logger.debug("mootdx 未安装，TCP 高速行情不可用。安装: pip install mootdx")
 
 
+class TrackedLock:
+    """带持有者追踪的锁，用于诊断「连接锁获取超时」时锁被谁长期占据。
+
+    普通 ``threading.Lock`` 不暴露持有者；这里在 acquire 成功后记录持有线程名
+    与获取时刻，release 时清除。超时的调用方可读取 ``holder()`` 得知「锁被哪个
+    线程持有了多久」，从而区分两类卡死：
+
+    - 切换线程（mootdx-bestip）卡死在重建/测速 → 死锁式无法切换；
+    - 取数线程（如 StockServer-*/worker）卡死在底层 mootdx socket 调用 → 网络/服务器不可用。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._owner: Optional[str] = None
+        self._since = 0.0
+        self._meta = threading.Lock()
+
+    def acquire(self, *args, **kwargs):
+        ok = self._lock.acquire(*args, **kwargs)
+        if ok:
+            with self._meta:
+                self._owner = threading.current_thread().name
+                self._since = time.time()
+        return ok
+
+    def release(self):
+        with self._meta:
+            self._owner = None
+            self._since = 0.0
+        self._lock.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+
+    def holder(self) -> str:
+        with self._meta:
+            if self._owner is None:
+                return "空闲"
+            return f"{self._owner}（已持 {time.time() - self._since:.1f}s）"
+
+
 _DEFAULT_KNOWN_SERVERS = [
     ("202.108.253.131", 7709),
     ("114.80.149.92", 7709),
@@ -44,7 +89,7 @@ class TdxClientManager:
     def __init__(self) -> None:
         self._client: Optional[object] = None
         self._best_server: Optional[Tuple[str, int]] = None
-        self._conn_lock = threading.Lock()
+        self._conn_lock = TrackedLock()
         self._last_ok_ts = 0.0
         # 连接空闲超过此时长（秒）且无成功记录，空结果才视为失效并重建。
         self._IDLE_RECONNECT_SEC = 300
@@ -74,6 +119,11 @@ class TdxClientManager:
     @property
     def lock(self) -> threading.Lock:
         return self._conn_lock
+
+    @property
+    def lock_holder(self) -> str:
+        """当前连接锁持有者信息（线程名 + 已持有时长），用于诊断超时根因。"""
+        return self._conn_lock.holder()
 
     @property
     def best_server(self) -> Optional[Tuple[str, int]]:
