@@ -56,6 +56,11 @@ class TdxClientManager:
         # 根治「所选 TDX 服务器不提供分钟数据/已不可达却永久卡在 503」的问题。
         self._fail_count = 0
         self._FAIL_SWITCH_THRESHOLD = 5
+        # 诊断信息：即使 best_server 为 None（受限网络选不出可用服务器），也能从
+        # 日志/接口看到「当前实际连的是哪台、测速结果如何」，定位分钟数据不可用根因。
+        self._current_server_desc = "未连接"
+        self._bench_done = False
+        self._bench_status = ""
 
         if MOOTDX_AVAILABLE:
             self.quick_start()
@@ -123,13 +128,22 @@ class TdxClientManager:
                 self._client = Quotes.factory(
                     market="std", server=self._best_server, timeout=3
                 )
+                self._current_server_desc = (
+                    f"{self._best_server[0]}:{self._best_server[1]}"
+                )
             else:
                 self._client = Quotes.factory(market="std", timeout=3)
-                logger.info("mootdx 使用内置默认 TDX 服务器（尚未测速择优）")
+                self._current_server_desc = (
+                    "mootdx 内置默认 TDX 服务器（未测速择优）"
+                )
+                logger.info(self._current_server_desc)
+            self._bench_done = False
+            self._bench_status = ""
             logger.info("mootdx TCP 客户端启动成功")
         except Exception as e:  # noqa: BLE001
             logger.warning(f"mootdx 客户端启动失败: {e}")
             self._client = None
+            self._current_server_desc = f"启动失败: {e}"
 
     def reconnect_if_idle(self) -> None:
         """调用方须持 ``lock``。空闲过久主动重建，避免死连接卡顿。"""
@@ -162,6 +176,7 @@ class TdxClientManager:
                         pass
                 self._client = new_client
                 self._best_server = server
+                self._current_server_desc = f"{server[0]}:{server[1]}"
             logger.info(f"mootdx 切换 TDX 服务器: {old} -> {server}")
         except Exception as e:  # noqa: BLE001
             logger.warning(f"mootdx 切换最优服务器失败: {e}")
@@ -203,16 +218,67 @@ class TdxClientManager:
         # 候选（测速最优）服务器需同时支持日线+分钟，否则落入已知列表兜底
         if chosen and self._verify_server(chosen):
             self.switch_to_best_server(chosen)
+            self._bench_done = True
+            self._bench_status = f"已选中测速最优服务器 {chosen[0]}:{chosen[1]}"
             return
 
         # 回退：遍历已知服务器，挑第一台「日线+分钟均可用」的
         for host, port in _DEFAULT_KNOWN_SERVERS:
             if self._verify_server((host, port)):
                 self.switch_to_best_server((host, port))
+                self._bench_done = True
+                self._bench_status = f"已选中已知服务器 {host}:{port}"
                 return
+        self._bench_done = True
+        self._bench_status = (
+            "未找到同时支持日线/分钟的 TDX 服务器（分钟数据可能持续不可用）"
+        )
         logger.warning(
             "mootdx 未发现同时支持日线/分钟的 TDX 服务器，分钟数据可能持续不可用"
         )
+
+    def _client_host(self) -> Optional[str]:
+        """best-effort 提取当前 mootdx 客户端实际连接的 host:port。
+
+        mootdx 的 Quotes 包装 pytdx API，pytdx 连接成功后保存 ``self.ip`` /
+        ``self.port``；不同封装层级下属性位置略有差异，逐级尝试，拿不到则返回 None。
+        """
+        c = self._client
+        if c is None:
+            return None
+        for obj in (c, getattr(c, "client", None)):
+            if not obj:
+                continue
+            ip = getattr(obj, "ip", None)
+            if ip:
+                port = getattr(obj, "port", None)
+                return f"{ip}:{port}" if port else str(ip)
+        return None
+
+    def diagnostic(self) -> dict:
+        """返回当前 TDX 连接诊断，供 ``/api/config`` 暴露（无需翻日志即可定位）。
+
+        关键字段：
+
+        - ``best_server``：测速选中的最优服务器（受限网络选不出时为 ``None``）；
+        - ``current_host``：当前**实际**连接的地址（优先从 client 提取，否则用描述）；
+        - ``bench_done`` / ``bench_status``：测速是否完成及结果（为何没选中）；
+        - ``connected``：底层 client 是否建立；``fail_count``：连续失败计数。
+        """
+        best = (
+            f"{self._best_server[0]}:{self._best_server[1]}"
+            if self._best_server
+            else None
+        )
+        host = self._client_host()
+        return {
+            "connected": self._client is not None,
+            "best_server": best,
+            "current_host": host or self._current_server_desc,
+            "bench_done": self._bench_done,
+            "bench_status": self._bench_status,
+            "fail_count": self._fail_count,
+        }
 
 
 _manager: Optional[TdxClientManager] = None
