@@ -209,27 +209,35 @@ class TdxClientManager:
         切换成功时打 info 日志，便于从日志直接看出现网连的是哪台 TDX 服务器；
         并额外校验分钟数据（frequency=7）可用——部分服务器只提供日线不提供分钟，
         仅校验日线会误切到一台仍无法返回分钟数据的服务器。
+
+        关键修正：构建 + 校验新客户端使用**独立临时连接**，全程**不持有**生产
+        连接锁；仅在「替换 self._client」这一瞬间（毫秒级）加锁。否则后台测速
+        线程（mootdx-bestip）会在锁内做 factory + 多次 bars 探测，单台慢服务器
+        即可让生产连接锁被占用数十秒，导致所有实时取数请求超时（见 2026-07-23 日志）。
         """
         if not server or not MOOTDX_AVAILABLE:
             return
+        # 1) 锁外：用临时连接构建并校验新客户端（慢/卡死不影响生产流量）
         try:
-            with self._conn_lock:
-                new_client = Quotes.factory(market="std", server=server, timeout=3)
-                new_client.bars(symbol="000001", category=4, offset=1)
-                # 分钟数据可用性校验：用户场景为「日线有、分钟无」，必须显式验证
-                new_client.bars(symbol="000001", frequency=7, offset=5)
-                old = self._best_server
-                if self._client is not None:
-                    try:
-                        self._client.close()
-                    except Exception:  # noqa: BLE001
-                        pass
-                self._client = new_client
-                self._best_server = server
-                self._current_server_desc = f"{server[0]}:{server[1]}"
-            logger.info(f"mootdx 切换 TDX 服务器: {old} -> {server}")
+            new_client = Quotes.factory(market="std", server=server, timeout=3)
+            new_client.bars(symbol="000001", category=4, offset=1)
+            # 分钟数据可用性校验：用户场景为「日线有、分钟无」，必须显式验证
+            new_client.bars(symbol="000001", frequency=7, offset=5)
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"mootdx 切换最优服务器失败: {e}")
+            logger.warning(f"mootdx 切换最优服务器校验失败 {server}: {e}")
+            return
+        # 2) 锁内：仅做「关旧 + 换新」这一瞬间的原子替换
+        with self._conn_lock:
+            old = self._best_server
+            if self._client is not None:
+                try:
+                    self._client.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            self._client = new_client
+            self._best_server = server
+            self._current_server_desc = f"{server[0]}:{server[1]}"
+        logger.info(f"mootdx 切换 TDX 服务器: {old} -> {server}")
 
     def start_bench(self) -> None:
         """异步测速选出最优服务器（不阻塞构造）。"""

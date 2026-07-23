@@ -86,7 +86,10 @@ class MootdxMinuteProvider(DataProvider):
         for attempt in range(2):
             try:
                 if not mgr.lock.acquire(timeout=mgr.LOCK_ACQUIRE_SEC):
-                    logger.warning(f"mootdx 分钟连接锁获取超时，放弃 {symbol}")
+                    logger.warning(
+                        f"mootdx 分钟连接锁获取超时，放弃 {symbol}；"
+                        f"锁当前由: {mgr.lock_holder}"
+                    )
                     return None, "mootdx 连接繁忙"
                 try:
                     mgr.reconnect_if_idle()
